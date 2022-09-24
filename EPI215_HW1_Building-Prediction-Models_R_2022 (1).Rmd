@@ -1,0 +1,310 @@
+---
+title: "EPI215 Homework 1 – Building Prediction Models"
+output: pdf_document
+author: \textcolor{answercolor}{\emph{YOUR NAME HERE}}
+date: \emph{Due Wed 9/21/2022}
+header-includes: \definecolor{answercolor}{rgb}{0.27,0.51,0.71}
+---
+
+## Cox Regression-based Prediction Models
+
+In lab 1 we demonstrated the concept of over-fitting and procedures for building prediction models and estimation of prediction error for continuous outcomes. For this homework you will interpret and compare survival predictions using pre-specified and iteratively (forward) selected models.   
+
+The data (**nhanes.sas7bdat**) and code book defining the variables for this assignment are on the course site under ‘Modules - Datasets’. We will be modeling the effect of several predictors on survival with a Cox Proportional Hazard model.   
+
+Example code is provided. Focus most of your efforts on interpretation and placing your results in context.   
+
+```{r 0, message=F}
+# Install & load packages
+if (!require(sas7bdat)) {install.packages("sas7bdat")}
+if (!require(survival)) {install.packages("survival")}
+if (!require(survminer)) {install.packages("survminer")}
+if (!require(gtools)) {install.packages("gtools")}
+if (!require(MASS)) {install.packages("MASS")}
+```
+
+### Part I: Pre-Specified Model
+
+Read in the NHANES data. Check number of variables and observations to be sure data read in properly.   
+
+#### 1.	Divide the data into training and test sets. How many subjects are in the training set?  
+
+```{r 1.1}
+# Load data
+nhanes <- read.sas7bdat("nhanes.sas7bdat", debug=FALSE)
+colnames(nhanes) <- tolower(colnames(nhanes))
+
+# Create indicator variables for race
+nhanes$white_race <- ifelse(nhanes$race==1,1,0)
+nhanes$black_race <- ifelse(nhanes$race==2,1,0)
+nhanes$other_race <- ifelse(nhanes$race==3,1,0)
+
+# Recode current smoker as 0 or 1; create formsmk; center age at 50; create t2death
+nhanes$currsmk <- 2-nhanes$smokr
+nhanes$formsmk <- ifelse(is.na(nhanes$smokr)|is.na(nhanes$smokever),
+                         NA,nhanes$currsmk==0&nhanes$smokever==1)
+nhanes$age50 <- nhanes$age-50
+nhanes$t2death <- nhanes$last_yr-nhanes$exam_yr
+nhanes <- subset(nhanes, select=-pulse)
+
+# Split the data into training and test sets
+set.seed(123)
+test_index <- runif(dim(nhanes)[1]) > 0.66
+nhanes.train <- nhanes[!test_index,]
+nhanes.test <- nhanes[test_index,]
+```  
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+####  2. In the training set, model the effect of age (centered at 50 years), cigarette use (>= 100 cigarettes in lifetime vs. < 100), diagnosed diabetes, self-reported race (reference=white), and sex on all-cause mortality.  
+
+```{r 1.2}
+# Parsimonious model of survival in training set
+m1 <- coxph(Surv(t2death, death) ~ age50+smokever+diab+black_race+other_race+male, 
+            data=nhanes.train, x=TRUE, y=TRUE)
+summary(m1)
+```
+
+##### a. What is the 10-year estimated risk of death for a 40-year old black female with no diabetes has smoked < 100 cigarettes, with a 95% confidence interval?
+
+```{r 1.2a & 1.2b}
+# Create a new dataset for estimating risk by covariate values
+high_low <- data.frame(rbind(c(-10,0,0,1,0,0),c(20,1,1,0,0,1)))
+colnames(high_low) <- c("age50","smokever","diab","black_race","other_race","male")
+
+# Estimate 10-year *survival* for subjects in 'high_low' dataset
+m1.highlow <- summary(survfit(m1, newdata=high_low), times=10)
+t(rbind(m1.highlow$surv, m1.highlow$lower, m1.highlow$upper))
+```  
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+##### b. What is the 10-year estimated risk of death for a 70-year old white male with diagnosed diabetes who has smoked >= 100 cigarettes, with a 95% confidence interval?  
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+#### 3. Calculate the cut-points for tertiles of the linear predictor (log hazard ratio) in the training set. Assign each subject in the training set to high, mid, and low-risk group tertiles using the prediction model.  
+
+```{r 1.3}
+# Predicted risk for training and test set
+m1.train <- predict(m1, type="risk", newdata=nhanes.train)
+m1.test <- predict(m1, type="risk", newdata=nhanes.test)
+
+# Linear predictor cut offs for high, medium, and low risk groups
+quantile(m1.train, probs=seq(0, 1, 1/3), na.rm=T)
+nhanes.train$rgroup1 <- as.factor(as.numeric(quantcut(m1.train,q=3)))
+```
+
+#### 4. Assign each subject in the test set to high, medium and low groups, using the tertiles calculates in the training set. 
+
+```{r 1.4}
+# Divide test data into tertiles of risk defined in training set
+nhanes.test$rgroup1 <- as.factor(as.numeric(cut(m1.test, 
+                                                breaks=quantile(m1.train,seq(0, 1, 1/3), na.rm=T))))
+```
+
+##### a. How many observations from the test set are in each risk group?  
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+##### b.	Are there any missing values for the risk group variable?  
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+$~$
+
+**BONUS QUESTION:** Please explain why there are or are not missing values for the risk group variable.  
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+#### 5. Create Kaplan-Meier plots of survival by risk group for the training and test set. How does the separation of the risk groups in the training set compare to the separation of risk groups in the test set – more, less, or approximately the same amount of separation? If there is a difference in these two plots, why would this model discriminate between risk groups any better in one set or the other? 
+
+```{r 1.5}
+nhanes.train$survobj <- with(nhanes.train, Surv(t2death, death))
+nhanes.test$survobj <- with(nhanes.test, Surv(t2death, death))
+km.m1.train <- survfit(survobj ~ rgroup1, data=nhanes.train, conf.type="log-log")
+km.m1.test <- survfit(survobj ~ rgroup1, data=nhanes.test, conf.type="log-log")
+ggsurvplot(km.m1.train, title="Kaplan Meier Plot for training data by tertiles of risk", 
+           xlab="t2death", ylab="Survival Probability")
+ggsurvplot(km.m1.test, title="Kaplan Meier Plot for test data by tertiles of risk", 
+           xlab="t2death", ylab="Survival Probability")
+```  
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+### Part II: Forward Selection for Risk Factors
+
+#### 1. Using forward selection, build a prediction model for survival in the training set.
+
+```{r 2.1-1, results=F}
+# Select variables of interest and remove missing values
+nhanes.train.sub <- na.omit(subset(nhanes.train, 
+                                   select=c(hemoglob:wbc,weight:stroke,age:packyrs,t2death,death)))
+
+# Fit forward selection model in training set
+m2.null <- coxph(Surv(t2death, death) ~ 1, data=nhanes.train.sub)
+m2.full <- coxph(Surv(t2death, death) ~ ., data=nhanes.train.sub)
+m2 <- stepAIC(m2.null, scope=formula(m2.full), direction="forward", k=2)
+```
+
+```{r 2.1-2}
+# Final model
+summary(m2)
+
+# Predicted risk for training and test set
+m2.train <- predict(m2, type="risk", newdata=nhanes.train.sub)
+m2.test <- predict(m2, type="risk", newdata=nhanes.test)
+```
+
+##### a. How many variables are considered for inclusion in the model?  
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+##### b. This is a complete case analysis - subjects missing any of the candidate predictors are excluded. How many subjects are used to build the model? How many of these died during follow-up?  
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+##### c. Which variables are included in the final model?  
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+#### 2. Assign subjects in the training set to high, mid, and low-risk groups using the new cut-offs in this larger prediction model.
+
+```{r 2.2}
+# Linear predictor cut offs for high, medium, and low risk groups
+quantile(m2.train, probs=seq(0, 1, 1/3), na.rm=T)
+nhanes.train.sub$rgroup2 <- as.factor(as.numeric(quantcut(m2.train,q=3)))
+```
+
+##### 3. Assign subjects in the test set to high, mid and low risk groups based on this larger prediction model. (Again, use the tertiles as defined in the training set)
+
+```{r 2.3}
+# Divide test data into tertiles of risk defined in training set
+nhanes.test$rgroup2 <- as.factor(as.numeric(cut(m2.test, 
+                                                breaks=quantile(m2.train,seq(0, 1, 1/3), na.rm=T))))
+```
+
+##### a. How many subjects are assigned to the new risk groups in the test set?  
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+##### b. Are there any missing values for the risk group variable?  
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+#### 4. Plot the K-M curves for the training set and for the test set by predicted risk group. Is there better separation of risk groups on the plot of the training set or on the plot of the test set? If there is a difference in these two plots, why would this model discriminate between risk groups any better in one set or the other? 
+
+```{r 2.4}
+# Kaplan Meier Plot for training and test data by tertiles of risk
+nhanes.train.sub$survobj <- with(nhanes.train.sub, Surv(t2death, death))
+km.m2.train <- survfit(survobj ~ rgroup2, data=nhanes.train.sub, conf.type="log-log")
+km.m2.test <- survfit(survobj ~ rgroup2, data=nhanes.test, conf.type="log-log")
+ggsurvplot(km.m2.train, title="Kaplan Meier Plot for training data by tertiles of risk", 
+           xlab="t2death", ylab="Survival Probability")
+ggsurvplot(km.m2.test, title="Kaplan Meier Plot for test data by tertiles of risk", 
+           xlab="t2death", ylab="Survival Probability")
+```
+
+$~$
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+### Part III: Forward Selection of Gene Expression Predictors
+
+#### 1. Using the simulated gene expression values as predictors, build a Cox Proportional Hazard model for time to death with forward selection.  
+
+```{r 3.1-1, results=F}
+# Simulate 'gene expression' data
+set.seed(123)
+geneset <- data.frame(matrix(rnorm(dim(nhanes)[1]*120),ncol=120))
+colnames(geneset) <- sprintf("gene%d", seq(1,120))
+geneset$t2death <- nhanes$t2death
+geneset$death <- nhanes$death
+
+# Split the data into training and test sets
+geneset.train <- geneset[!test_index,]
+geneset.test <- geneset[test_index,]
+
+# Fit forward selection model in training set
+m3.null <- coxph(Surv(t2death, death) ~ 1, data=geneset.train)
+m3.full <- coxph(Surv(t2death, death) ~ ., data=geneset.train)
+m3 <- stepAIC(m3.null, scope=formula(m3.full), direction="forward", k=2)
+```
+
+```{r 3.1-2}
+# Final model
+summary(m3)
+
+# Predicted risk for training and test set
+m3.train <- predict(m3, type="risk", newdata=geneset.train)
+m3.test <- predict(m3, type="risk", newdata=geneset.test)
+```
+
+##### a. How many genes were included in the final model?  
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+##### b. How many of these variables are significant predictors of survival at alpha=0.05?  
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+$~$
+
+**BONUS QUESTION:** If you simulated the 120 gene expression values 10,000 times and fit the same Cox Proportional Hazard model to each simulated dataset, on average, how many genes would you expect to be selected into the final model if using forward selection with an entry criterion of p=0.15?  
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+$~$
+
+**BONUS QUESTION:** If you changed the p-value threshold for the forward selection to p=0.10, how many variables would you expect to be selected into the final model (over 10,000 simulations)?  
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+#### 2. Assign subjects in the training set to high, mid, and low-risk groups using the new cut-offs in the ‘gene expression’ prediction model.  
+
+```{r 3.2}
+# Linear predictor cut offs for high, medium, and low risk groups
+quantile(m3.train, probs=seq(0,1,1/3), na.rm=T)
+geneset.train$rgroup3 <- as.factor(as.numeric(quantcut(m3.train,q=3)))
+```
+
+#### 3. Assign subjects in the test set to risk groups based on the ‘gene expression’ prediction model. 
+
+```{r 3.3}
+# Divide test data into tertiles of risk defined in training set
+geneset.test$rgroup3 <- as.factor(as.numeric(cut(m3.test, 
+                                                 breaks=quantile(m3.train,seq(0,1,1/3), na.rm=T))))
+```
+
+##### a. How many subjects are assigned to the new risk groups in the test set?  
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+##### b. Are there any missing values for the risk group variable?  
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+#### 4. Plot the K-M curves for the training set and for the test set by ‘gene expression’ risk group. How does the separation of the risk groups in the training set compare to the separation of risk groups in the test set – more, less, or approximately the same amount of separation? If there is a difference in these two plots, why would this model discriminate between risk groups any better in one set or the other? 
+
+```{r 3.4}
+# Kaplan Meier Plot for training and test data by tertiles of risk
+geneset.train$survobj <- with(geneset.train, Surv(t2death, death))
+geneset.test$survobj <- with(geneset.test, Surv(t2death, death))
+km.m3.train <- survfit(survobj ~ rgroup3, data=geneset.train, conf.type="log-log")
+km.m3.test <- survfit(survobj ~ rgroup3, data=geneset.test, conf.type="log-log")
+ggsurvplot(km.m3.train, title="Kaplan Meier Plot for training data by tertiles of risk", 
+           xlab="t2death", ylab="Survival Probability")
+ggsurvplot(km.m3.test, title="Kaplan Meier Plot for test data by tertiles of risk", 
+           xlab="t2death", ylab="Survival Probability")
+```  
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+#### 5. Give a choice between the pre-specified/parsimonious model in Part I and the ‘gene expression’ model, which would you expect to be a more effective tool for prediction and why?  
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}
+
+#### 6. Discuss the test set performance for the models developed in these three parts. What do the K-M plots tell us about model performance? Why do the models that have good test set performance relative to the training set performance have good performance? Why do those that have poor test set performance have poor performance? (Don’t just say. “they are overfit.” Why do you think they overfit the data?)  
+
+
+\textcolor{answercolor}{[YOUR ANSWER HERE]}

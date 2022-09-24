@@ -1,0 +1,322 @@
+---
+title: "EPI215 Homework 2 – Evaluating Models"
+output: pdf_document
+author: \textcolor{answercolor}{YOUR NAME HERE}
+date: Due Wed 9/28/2022
+header-includes: \definecolor{answercolor}{rgb}{0.27,0.51,0.71}
+---
+
+Homework 2 focuses on predictive model assessment. We will do this by comparing 2 types of models:  (1) a ‘simple’ model which includes variables that are known without a doctor’s visit and (2) a ‘clinical model’ which includes additional variables that require a doctor’s visit. Let’s see how much improvement we get by including the more invasive tests.  Our outcome of interest for this homework is diabetes, T2DM.
+
+# Part A: Creating models
+
+## 0. Data preparation
+
+```{r 0, message=F}
+# Install & load packages
+if (!require(sas7bdat)){install.packages("sas7bdat")}
+if (!require(pROC)){install.packages("pROC")}
+```  
+
+### a. Calculate BMI  
+
+```{r 0a}
+hw2.train <- read.sas7bdat("epi215_lab1_train.sas7bdat", debug=F)
+hw2.train$BMI <- (hw2.train$WEIGHT/100)/((hw2.train$HEIGHT/100)**2)
+```
+
+### b. Create a flag for anyone with missing data on any of these variables
+
+```{r 0b}
+hw2.train$flagmiss <- ifelse(rowSums(is.na(hw2.train[c("SMOKR","EMPHYS","HDL","AGE",
+                                                       "BMI","PULSE","sbp")]))==0, 0, 1)
+addmargins(table(hw2.train$flagmiss, hw2.train$DIAB))
+```
+
+## 1. Determine the underlying probability of T2DM in the sample (do NOT use flag). We can do this by running a model with no covariates and store our predictions. 
+
+```{r 1}
+m1 <- glm(DIAB ~ 1, data=hw2.train, family="binomial"); summary(m1)
+addmargins(table(hw2.train$DIAB))
+```
+
+### a. Using the output from this intercept only logistic model, what is the calculated probability of having diabetes in this study sample?  
+
+\textcolor{answercolor}{-3.3 of beta0, or 177/5132= ~0.034} 
+
+### b. You can also do this by dividing the # of those with T2DM by total # of people.  Does this number equal what you got in question 1a?
+
+\textcolor{answercolor}{around 3 %}
+
+## 2. Fit a ‘simple’ model for diabetes using variables that do not require lab/office tests — age, bmi and current smoking status, as predictors and store the predicted probabilities for evaluation. 
+
+```{r 2}
+m2 <- glm(DIAB ~ AGE + SMOKR + BMI, family="binomial", data=hw2.train)
+hw2.train$p_s <- predict(m2, type="response", newdata=hw2.train)
+summary(hw2.train$p_s)
+summary(m2)
+```
+
+### a. What are the lowest and highest predicted probabilities (phat) of diabetes using these predictors? 
+
+\textcolor{answercolor}{This is the upper and lower limits of p_s: 0.004491-0.199774} 
+
+### b.	What is the mean phat for diabetes and how does it compare to the mean phat from question 1? Does this make sense, and why?
+
+\textcolor{answercolor}{it is simmilar and around 3 precent probability} 
+
+### c. Write out the formula for predicted probability (phat) of diabetes from this model
+
+\textcolor{answercolor}{ln(DIAB/nonDIAB) = b0 AGE*b1 + SMOKR*b2 + BMI*b3}
+
+## 3. Fit a ‘clinical’ model for diabetes by including variables that require lab/office tests (in addition to those in the simple model).  These include the simple model + pulse, HDL, emphysema diagnosis and sbp and store the predicted probabilities for evaluation. 
+
+```{r 3}
+m3 <- glm(DIAB ~ AGE + SMOKR + BMI + PULSE + HDL + EMPHYS + sbp, family="binomial", data=hw2.train)
+hw2.train$p_c <- predict(m3, type="response", newdata=hw2.train)
+summary(hw2.train$p_c)
+summary(m3)
+```
+
+### a. What are the lowest and highest predicted probabilities (phat) of diabetes using these predictors? 
+
+\textcolor{answercolor}{This is the upper and lower limits of p_c: 0.0009-0.2446} 
+
+### b.	What is the mean phat for diabetes and how does it compare to the mean phat from question 1? Does this make sense, and explain why it is different?
+
+\textcolor{answercolor}{mean} 
+
+### c.	Write out the formula for predicted probability (phat) of diabetes from this model.
+
+\textcolor{answercolor}{~3%} 
+
+# Part B: Comparing models
+
+## 4. When comparing models, it is important that you use exactly the same samples for all models, which means everyone included should have non-missing data for all variables under consideration in each model. 
+
+### a. Based on results in question 2 and 3, explain why this is important.
+
+\textcolor{answercolor}{missingness could potentially effct the validity of the results and affect model preformance, the last model had more missing values} 
+
+### b. Re-run the models using only those with complete data (where flagmiss = 0)
+
+```{r 4b}
+complete <- hw2.train[which(hw2.train$flagmiss==0),] # n=3982
+
+m2_c <- glm(DIAB ~ AGE + SMOKR + BMI, family="binomial", data=complete)
+complete$p_s <- predict(m2_c, type="response", newdata=complete)
+
+m3_c <- glm(DIAB ~ AGE + SMOKR + BMI + PULSE + HDL + EMPHYS + sbp, family="binomial", data=complete)
+complete$p_c <- predict(m3_c, type="response", newdata=complete)
+```
+
+### c. Create a ROC graph that includes ROC curves from both the simple and the clinical model.  Report and compare the c-statistics/AUC. Which model performs better overall?
+
+```{r 4c}
+# Simple model
+roc_s <- roc(complete$DIAB ~ complete$p_s); roc_s 
+
+# Clinical model
+roc_c <- roc(complete$DIAB ~ complete$p_c); roc_c 
+
+# DeLong's test 
+roc.test(roc_s, roc_c, alternative="two.sided") 
+
+# ROC curves
+plot(roc_s, legacy.axes=T, col="orange"); plot(roc_c, legacy.axes=T, col="darkgreen", add=T)
+legend("bottomright", legend=c("AUC (Simple): 0.693", "AUC (clinical): 0.723"), 
+       col=c("orange", "darkgreen"), lty=1:1, cex=0.8)
+```
+
+$~$
+
+\textcolor{answercolor}{green is significanly better AUC of 0.7231186 p value significant } 
+
+### Code for question 4d, 4e, 4f
+
+```{r 4def-1}
+#========= Simple Model ==============#
+
+# Threshold for 5% FPF = 95%tile phat, 3% FPF = 97%tile phat of the controls 
+cont <- complete[which(complete$DIAB==0), ]
+x1 <- quantile(cont$p_s, c(.95))
+x2 <- quantile(cont$p_s, c(.97))
+flag <- 1
+out_s <- NULL; out_s <- cbind(x2, x1, flag); colnames(out_s) <- c("FPF3_s", "FPF5_s", "flag")
+
+# Thresholds for sensitivity 90% and 95%
+case <- complete[ which(complete$DIAB==1), ]
+y <- quantile (case$p_s, c(.05, .10))
+out_s2 <- NULL; out_s2 <- cbind(y[2], y[1]); colnames(out_s2) <- c("SENS90_s", "SENS95_s")
+
+# Merge 
+out_use <- NULL; out_use <- cbind(out_use, out_s, out_s2); row.names(out_use) <- c()
+
+# Calculate the sensitivity and positivity at different threshold
+complete$flag <- 1; hw2.simplev2 <- merge(complete, out_use, by=c("flag"))
+
+attach(hw2.simplev2)
+hw2.simplev2$pos_fpf5 <- ifelse(p_s >= FPF5_s, 1, 0) # threshold using FPF 5%
+hw2.simplev2$pos_fpf3 <- ifelse(p_s >= FPF3_s, 1, 0)  # threshold using FPF 3%
+
+hw2.simplev2$pos_sens90 <- ifelse(p_s >= SENS90_s, 1, 0) # threshold using sens 90%
+hw2.simplev2$pos_sens95 <- ifelse(p_s >= SENS95_s, 1, 0) # threshold using sens 95%
+
+mean_phat <- mean(hw2.train$p_c, na.rm=T)
+hw2.simplev2$pos_p03 <- ifelse(p_s >= mean_phat, 1, 0) # threshold using mean phat 
+hw2.simplev2$pos_p10 <- ifelse(p_s >= 0.10, 1, 0)      # threshold using greater than 10%
+
+hw2.simplev2$risk_grp_s[p_s > 0 & p_s <= 0.02] <- 1
+hw2.simplev2$risk_grp_s[p_s > 0.02 & p_s <= 0.05] <- 2
+hw2.simplev2$risk_grp_s[p_s > 0.05 & p_s <= 0.10] <- 3
+hw2.simplev2$risk_grp_s[p_s > 0.10] <- 4
+detach(hw2.simplev2)
+
+# Tables 
+attach(hw2.simplev2)
+# FPF = 5%
+addmargins(table(pos_fpf5, DIAB)); round(prop.table(table(pos_fpf5, DIAB), 2), 4)
+# FPF = 3%
+addmargins(table(pos_fpf3, DIAB)); round(prop.table(table(pos_fpf3, DIAB), 2), 4)
+# Sens = 95%
+addmargins(table(pos_sens95, DIAB)); round(prop.table(table(pos_sens95, DIAB), 2), 4)
+# Sens = 90%
+addmargins(table(pos_sens90, DIAB)); round(prop.table(table(pos_sens90, DIAB), 2), 4)
+# phat >= mean phat
+addmargins(table(pos_p03, DIAB)); round(prop.table(table(pos_p03, DIAB), 2), 4)
+# phat >= 0.1
+addmargins(table(pos_p10, DIAB)); round(prop.table(table(pos_p10, DIAB), 2), 4)
+detach(hw2.simplev2)
+```
+
+```{r 4def-2}
+#========= Clinical Model ==============#
+
+# Threshold for 5% FPF = 95%tile phat, 3% FPF = 97%tile phat of the controls 
+cont <- complete[which(complete$DIAB==0), ]
+x1 <- quantile(cont$p_c, c(.95))
+x2 <- quantile(cont$p_c, c(.97))
+flag <- 1
+out_c <- NULL; out_c <- cbind(x2, x1, flag); colnames(out_c) <- c("FPF3_c", "FPF5_c", "flag")
+
+# Thresholds for sensitivity 90% and 95%
+case <- complete[ which(complete$DIAB==1), ]
+y <- quantile (case$p_c, c(.05, .10))
+out_c2 <- NULL; out_c2 <- cbind(y[2], y[1]); colnames(out_c2) <- c("SENS90_c", "SENS95_c")
+
+# Merge 
+out_use <- NULL; out_use <- cbind(out_use, out_c, out_c2); row.names(out_use) <- c()
+
+# Calculate the sensitivity and positivity at different threshold
+complete$flag <- 1; hw2.clinicalv2 <- merge(complete, out_use, by=c("flag"))
+
+attach(hw2.clinicalv2)
+hw2.clinicalv2$pos_fpf5 <- ifelse(p_c >= FPF5_c, 1, 0) # threshold using FPF 5%
+hw2.clinicalv2$pos_fpf3 <- ifelse(p_c >= FPF3_c, 1, 0)  # threshold using FPF 3%
+
+hw2.clinicalv2$pos_sens90 <- ifelse(p_c >= SENS90_c, 1, 0) # threshold using sens 90%
+hw2.clinicalv2$pos_sens95 <- ifelse(p_c >= SENS95_c, 1, 0) # threshold using sens 95%
+
+mean_phat <- mean(hw2.train$p_c, na.rm=T)
+hw2.clinicalv2$pos_p03 <- ifelse(p_c >= mean_phat, 1, 0) # threshold using mean phat 
+hw2.clinicalv2$pos_p10 <- ifelse(p_c >= 0.10, 1, 0)      # threshold using greater than 10%
+
+hw2.clinicalv2$risk_grp_c[p_c > 0 & p_c <= 0.02] <- 1
+hw2.clinicalv2$risk_grp_c[p_c > 0.02 & p_c <= 0.05] <- 2
+hw2.clinicalv2$risk_grp_c[p_c > 0.05 & p_c <= 0.10] <- 3
+hw2.clinicalv2$risk_grp_c[p_c > 0.10] <- 4
+detach(hw2.clinicalv2)
+
+# Tables 
+attach(hw2.clinicalv2)
+# FPF = 5%
+addmargins(table(pos_fpf5, DIAB)); round(prop.table(table(pos_fpf5, DIAB), 2), 4)
+# FPF = 3%
+addmargins(table(pos_fpf3, DIAB)); round(prop.table(table(pos_fpf3, DIAB), 2), 4)
+# Sens = 95%
+addmargins(table(pos_sens95, DIAB)); round(prop.table(table(pos_sens95, DIAB), 2), 4)
+# Sens = 90%
+addmargins(table(pos_sens90, DIAB)); round(prop.table(table(pos_sens90, DIAB), 2), 4)
+# phat >= mean phat
+addmargins(table(pos_p03, DIAB)); round(prop.table(table(pos_p03, DIAB), 2), 4)
+# phat >= 0.1
+addmargins(table(pos_p10, DIAB)); round(prop.table(table(pos_p10, DIAB), 2), 4)
+detach(hw2.clinicalv2)
+```
+
+### d. A common way to compare models is to look at sensitivities at set FPFs (e.g. 3%, 5%). Calculate the sensitivities of both models at FPF = 3% and FPF = 5%.  What does this tell you about which model is ‘better’? (define ‘better’ in your explanation)
+
+|     Model                  |     Sensitivity    |     FPF       |
+|----------------------------|--------------------|---------------|
+|     Simple (5% FPF)        |          0.18      |     0.05      |
+|     Clinical (5% FPF)      |          0.23      |     0.05      |
+|                            |                    |               |
+|     Simple (3% FPF)        |          0.11      |     0.03      |
+|     Clinical (3% FPF)      |          0.18      |     0.03      |
+
+\textcolor{answercolor}{Senetivity is higher in the 5% and 3% clinicl sets} 
+
+### e. Another way to compare models is to compare FPFs at set sensitivities (e.g. 90%, 95%).  Calculate the FPFs of both models at Sens = 90% and 95%.  What does this tell you about which model is ‘better’?  (define ‘better’ in your explanation)
+
+|     Model                  |     Sensitivity    |     FPF       |
+|----------------------------|--------------------|---------------|
+|     Simple (90% sens)      |     0.90           |     0.89      |
+|     Clinical (90% sens)    |     0.90           |     0.68  
+|
+|                            |                    |               |
+|     Simple (95% sens)      |     0.95           |    0.94       |
+|     Clinical (95% sens)    |     0.95           |    0.83       |
+
+\textcolor{answercolor}{The FPFs  of simpele are higher in both simple models (at Sens = 90% and 95%)}  
+
+### f. Yet another way to compare models is to look at sensitivity and FPF at various meaningful cut-offs.  Report the sensitivity and FPF at 
+
+### i. the mean phat as a cutoff for ‘screen positive’   
+
+|     Model       |     Sensitivity    |     FPF       |
+|-----------------|--------------------|---------------|
+|     Simple      |          0.67      |     0.40      |
+|     Clinical    |          0.74      |     0.33      |
+
+### ii.	greater than 10% probability as a cutoff for ‘screen positive’ (phat > 0.1)
+
+|     Model       |     Sensitivity    |     FPF       |
+|-----------------|--------------------|---------------|
+|     Simple      |      0.03          |    0.009      |
+|     Clinical    |      0.17          |    0.02
+|
+
+### g.	Untreated diabetes can dramatically decrease life expectancy, increase the risk of fatal and non-fatal MI, and lead to vision and other severe complications.  Knowing this, which method do you think is best (d, e or f) for determining which model to use and what should be the threshold of ‘positive screen’ under 2 scenarios? (Note: there is not necessarily a right or wrong answer, just justify your answer) 
+
+### i. Those who screen positive will be prescribed medication that has possible side effects.  
+
+\textcolor{answercolor}{Ignoring any cost effectivness aspects, prescribed medication is an intervention and thus i'll choose (d) } 
+
+### ii. Those who screen positive will be referred to a nutritionist and trainer to discuss life style changes.  
+
+\textcolor{answercolor}{Again, ignoring any cost effectivness aspects, it seems that the trajectory of untreated diabetes is severe enough to have a high sensetivity test to "catch" almost all and "pay" a relativly high amount of FPF- in consultetions (mild intervaention) in this case (e).} 
+
+## 5.	Let’s compare the simple model (old) to the clinical model (new).  Use the following risk categories, low (0-2%), med (>2-5%), high (>5-10%), very high (>10%) to: 
+
+### a. Construct 2 reclassification charts, one for cases and one for controls.
+
+```{r 5}
+simple <- hw2.simplev2[c("id", "p_s", "risk_grp_s")]
+clinical <- hw2.clinicalv2[c("id", "p_c", "risk_grp_c", "DIAB")]
+nri <- merge(simple, clinical, by=c("id"))
+
+# Risk_grp: 1= 0-2%, 2= >2-5%, 3= >5-10%, 4= >10%
+ftable(table(nri$DIAB, nri$risk_grp_s, nri$risk_grp_c)) 
+```
+
+### b. Calculate the NRI for cases only
+
+\textcolor{answercolor}{p^up= (7+0+0+15+3)/3= 8.33, p^down= (0+0+0+11+1+7)/3= 6.33 >>> NRI for cases 2} 
+
+### c.	Calculate the NRI for controls only
+
+\textcolor{answercolor}{p^up= (211+4+0+14+210+3)/21= 21.04, p^down= (420+17+0+14+1+238)/21= 32.85 >>> NRI for cases -11.81} 
+
+### d. Total NRI
+
+\textcolor{answercolor}{NRI tot= 2-(-11)=13} 
