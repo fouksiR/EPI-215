@@ -1,0 +1,798 @@
+---
+title: "EPI215 final project G7"
+author: "Rstudio"
+date: '2022-10-06'
+output: html_document
+---
+
+##########################################
+########################################
+
+Screening-Tool- Hearing loss in adults
+
+
+######################################
+#########################################
+
+
+######################################
+
+### OUTLINE
+
+######################################
+
+0.  Data exploration and preparation
+1.  Missing data and imputation
+2.  Building prediction model and evaluating their performance
+3.  Compare the models
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Install & load packages
+
+```{r}
+# load df
+
+#library(googlesheets4)
+#Read google sheets data into R
+#x <- read_sheet('https://docs.google.com/spreadsheets/d/13U79ERTstBLgTVCdXYFhAMxE6wAUry7AVFf3AAt32_s/edit#gid=1499747299')
+```
+Install & load packages
+```{r}
+if (!require(sas7bdat)) {install.packages("sas7bdat")}
+if (!require(Hmisc)) {install.packages("Hmisc")}
+if (!require(MASS)) {install.packages("MASS")}
+if (!require(caret)) {install.packages("caret")}
+if (!require(leaps)) {install.packages("leaps")}
+if (!require(gamlr)) {install.packages("gamlr")}
+if (!require(glmnet)) {install.packages("glmnet")}
+if (!require(sas7bdat)) {install.packages("sas7bdat")}
+if (!require(dplyr)) {install.packages("dplyr")}
+if (!require(purrr)) {install.packages("purrr")}
+if (!require(pROC)) {install.packages("pROC")}
+if (!require(survivalROC)) {install.packages("survivalROC")}
+if (!require(survival)) {install.packages("survival")}
+if (!require(tidyr)) {install.packages("tidyr")}
+if (!require(ggplot2)) {install.packages("ggplot2")}
+if (!require(arsenal)) {install.packages("arsenal")}
+if (!require(tidyverse)) {install.packages("tidyverse")}
+if (!require(mice)) {install.packages("mice")}
+```
+
+## Data exploration 
+```{r}
+df <- project_data
+#rename some columns 
+#names(df)[2]=paste("ID")
+
+#define variables as binary
+df$AGE=as.numeric(df$AGE)
+df$BIRTHYR=as.numeric(df$BIRTHYR)
+df$YRMARR =as.numeric(df$YRMARR)
+df$INCTOT =as.numeric(df$INCTOT)
+df$FTOTINC =as.numeric(df$FTOTINC)
+df$INCWAGE =as.numeric(df$INCWAGE)
+df$INCBUS00 =as.numeric(df$INCBUS00)
+df$INCWELFR =as.numeric(df$INCWELFR)
+df$TRANTIME =as.numeric(df$TRANTIME)
+df$DEPARTS =as.numeric(df$DEPARTS)
+df$ARRIVES =as.numeric(df$ARRIVES)
+df$FAMSIZE =as.numeric(df$FAMSIZE)
+df$ELDCH =as.numeric(df$ELDCH)
+df$AGE =as.numeric(df$AGE)
+df$BIRTHYR =as.numeric(df$BIRTHYR)
+df$YRMARR =as.numeric(df$YRMARR)
+df$UHRSWORK =as.numeric(df$UHRSWORK)
+df$WKSWORK2 =as.numeric(df$WKSWORK2)
+df$VETKOREA=as.factor(df$VETKOREA)
+df$MARRNO=as.integer(df$MARRNO)
+
+glimpse(df)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+##Rename and replace values, reduce number of values
+
+```{r}
+df["FAMSIZE"][df["FAMSIZE"] == "1 family member present"] <- "1"
+df["FAMSIZE"][df["FAMSIZE"] == "2 family members present"] <- "2"
+unique(df$FAMSIZE)
+
+#in the excel file there are: "90 (90+ in 1980 and 1990)":
+#df["AGE"][df["AGE"] == "90 (90+ in 1980 and 1990)", "96", "95" ] <- "95"
+
+df["MARRNO"][df["MARRNO"] == "Married once"] <- "1"
+df["MARRNO"][df["MARRNO"] == "Married thrice (or more)"] <- "2"
+df["MARRNO"][df["MARRNO"] == "Married twice (or more)"] <- "2"
+unique(df$MARRNO)
+df$MARRNO =as.ordered(df$MARRNO)
+
+df["EDUC"][df["EDUC"] == "Grade 12"] <- "HighSc"
+df["EDUC"][df["EDUC"] == "Grade 11"] <- "HighSc"
+df["EDUC"][df["EDUC"] == "Grade 10"] <- "HighSc"
+df["EDUC"][df["EDUC"] == "Grade 9"] <- "HighSc"
+df["EDUC"][df["EDUC"] == "Grade 5, 6, 7, or 8"] <- "ElemSc2"
+df["EDUC"][df["EDUC"] == "Nursery school to grade 4"] <- "ElemSc1"
+df["EDUC"][df["EDUC"] == "1 year of college"] <- "College1"
+df["EDUC"][df["EDUC"] == "2 years of college"] <- "College1"
+df["EDUC"][df["EDUC"] == "5+ years of college"] <- "College2"
+df["EDUC"][df["EDUC"] == "4 years of college"] <- "College2"
+unique(df$EDUC)
+
+df["EDUC"][df["EDUC"] == "College2"] <- "5"
+df["EDUC"][df["EDUC"] == "College1"] <- "4"
+df["EDUC"][df["EDUC"] == "HighSc"] <- "3"
+df["EDUC"][df["EDUC"] == "ElemSc2"] <- "2"
+df["EDUC"][df["EDUC"] == "ElemSc21"] <- "1"
+df["EDUC"][df["EDUC"] == "N/A or no schooling"] <- "NA"
+
+df$EDUC =as.ordered(df$EDUC)
+
+#df["INCTOT"][df["INCTOT"] == "1"] <- "0"
+#df["INCTOT"][df["INCTOT"] == "<0"] <- "0"
+#df["INCTOT"][df["INCTOT"] == "20"] <- "0"
+#df["INCTOT"][df["INCTOT"] == "100"] <- "0"
+
+df["FTOTINC"][df["FTOTINC"] == "<0"] <- "0"
+
+#Veterens order
+df["VET01LTR"][df["VET01LTR"] == "Served this period"] <- "1"
+df["VET01LTR"][df["VET01LTR"] == "Did not serve this period"] <- "0"
+
+df["VET90X01"][df["VET90X01"] == "Served this period"] <- "1"
+df["VET90X01"][df["VET90X01"] == "Did not serve this period"] <- "0"
+
+df["VET75X90"][df["VET75X90"] == "Yes, served this period"] <- "1"
+df["VET75X90"][df["VET75X90"] == "N/A or No"] <- "0"
+df["VET75X90"][df["VET75X90"] == "No"] <- "0"
+
+df["VETVIETN"][df["VETVIETN"] == "Yes, Vietnam-era veteran"] <- "1"
+df["VETVIETN"][df["VETVIETN"] == "No"] <- "0"
+
+df["VET90X01"][df["VET90X01"] == "Served this period"] <- "1"
+df["VET90X01"][df["VET90X01"] == "Did not serve this period"] <- "0"
+
+df["VET55X64"][df["VET55X64"] == "Yes, served this period"] <- "1"
+df["VET55X64"][df["VET55X64"] == "N/A or No"] <- "0"
+
+df["VETKOREA"][df["VETKOREA"] == "Yes, served this period"] <- "1"
+df["VETKOREA"][df["VETKOREA"] == "N/A or No"] <- "0"
+df["VETKOREA"][df["VETKOREA"] == "No"] <- "0"
+
+df["VETWWII"][df["VETWWII"] == "Yes, served this period"] <- "1"
+df["VETWWII"][df["VETWWII"] == "N/A; N/A or No (1980, 1990 US)"] <- "0"
+df["VETWWII"][df["VETWWII"] == "No"] <- "0"
+
+#should we group salary?
+hist(df$INCTOT)
+#does salary goes with family income?
+cor(df$INCTOT, df$FTOTINC, method = "pearson")
+plot(df$INCTOT, df$FTOTINC)
+
+df["VETDISAB"][df["VETDISAB"] == "0 percent disability rating"] <- "No disability rating"
+unique(df$VETDISAB)
+
+df["DIFFHEAR"][df["DIFFHEAR"] == "No"] <- "0"
+df["DIFFHEAR"][df["DIFFHEAR"] == "Yes"] <- "1"
+
+df["GCHOUSE"][df["GCHOUSE"] == "No"] <- "0"
+df["GCHOUSE"][df["GCHOUSE"] == "Yes"] <- "1"
+df["GCRESPON"][df["GCRESPON"] == "No"] <- "0"
+df["GCRESPON"][df["GCRESPON"] == "Yes"] <- "1"
+
+df["CARPOOL"][df["CARPOOL"] == "Drives alone"] <- "0"
+df["CARPOOL"][df["CARPOOL"] == "Carpools"] <- "1"
+
+
+df["LABFORCE"][df["LABFORCE"] == "No, not in the labor force"] <- "0"
+df["LABFORCE"][df["LABFORCE"] == "Yes, in the labor force"] <- "1"
+
+df["AVAILBLE"][df["AVAILBLE"] == "No, other reason(s)"] <- "0"
+df["AVAILBLE"][df["AVAILBLE"] == "No, temporarily ill"] <- "0"
+df["AVAILBLE"][df["AVAILBLE"] == "Yes, available for work"] <- "1"
+
+df["WORKEDYR"][df["WORKEDYR"] == "No, but worked 1-5 years ago (ACS only)"] <- "0"
+df["WORKEDYR"][df["WORKEDYR"] == "No"] <- "0"
+df["WORKEDYR"][df["WORKEDYR"] == "Yes"] <- "1"
+
+df["WRKLSTWK"][df["WRKLSTWK"] == "Did not work"] <- "0"
+df["WRKLSTWK"][df["WRKLSTWK"] == "Worked"] <- "1"
+
+df["LOOKING"][df["LOOKING"] == "No, did not look for work"] <- "0"
+df["LOOKING"][df["LOOKING"] == "Yes, looked for work"] <- "1"
+
+df["VETDISAB"][df["VETDISAB"] == "No disability rating"] <- "0"
+df["VETDISAB"][df["VETDISAB"] ==  "10 or 20 percent disability rating"] <- "1"
+df["VETDISAB"][df["VETDISAB"] == "30 or 40 percent"] <- "2"
+df["VETDISAB"][df["VETDISAB"] == "50 or 60 percent"] <- "3"
+df["VETDISAB"][df["VETDISAB"] == "70 percent or higher"] <- "4"
+df["VETDISAB"][df["VETDISAB"] == "Has disability rating, level not reported"] <- "1"
+
+df["DIVINYR"][df["DIVINYR"] == "Blank (No)"] <- "0"
+df["DIVINYR"][df["DIVINYR"] == "Yes"] <- "1"
+
+
+df$VETDISAB =as.ordered(df$VETDISAB)
+```
+
+Drop "redundant" columns
+```{r}
+### Remove variables we don't need
+trim <- c("WIDINYR", "MARRINYR","HISPAN", "ELDCH", "BIRTHYR", "TRANTIME", "TRANWORK", "VETSTATD", "VETSTAT", "VETOTHER", "CLASSWKR", "AVAILBLE" ,"DEPART", "ARRIVES", "YRMARR" , "Disab.Dummy")
+df <- df[, !(names(df) %in% trim)]
+
+```
+
+```{r}
+
+#Merge Vet old column into one
+df$VET47X50 =as.numeric(df$VET47X50)
+df$VET55X64 =as.numeric(df$VET55X64)
+df$VET75X90 =as.numeric(df$VET75X90)
+df$VET90X01 =as.numeric(df$VET90X01)
+df$VETVIETN =as.numeric(df$VETVIETN)
+df$VETWWII =as.numeric(df$VETWWII)
+df$VETKOREA =as.numeric(df$VETKOREA)
+
+df$VET.OLD = rowSums(df[,c(36:42)])
+df$VET.OLD <- ifelse(is.na(df$VET47X50 | df$VET55X64 | df$VET75X90 | df$VET90X01 | df$VETVIETN | df$VETWWII | df$VETKOREA ), 0, 1)
+unique(df$VET.OLD)
+
+#names(df)[39]=paste("VET.YOUNG")
+
+# now we have old vetern and young vetern and we could drop the dummy VET columns
+trim2 <- c("VET47X50", "VET55X64","VET75X90", "VET90X01", "VETVIETN", "VETWWII", "VETKOREA")
+df <- df[, !(names(df) %in% trim2)]
+
+df$VET.OLD=as.character(df$VET.OLD)
+```
+
+display each of the unique values for each variable:
+```{r}
+
+sapply(lapply(df, unique), length)
+lapply(df[c("EDUC", "LABFORCE", "WRKLSTWK", "LOOKING", "WORKEDYR", "INCTOT", "FTOTINC", "INCWAGE", "VETDISAB", "CARPOOL", "DEPARTS",  "GCHOUSE", "GCRESPON", "VET.OLD")], unique)
+```
+
+VETDISAB is such a good predicor but only one category is associated with better outcome
+(compere Disnab.Dummy  with VETDISAB)
+```{r}
+df$Disab.Dummy <- ifelse(df$VETDISAB == "No disability rating", 1, 0)
+df$Disab.Dummy <- ifelse(is.na(df$VETDISAB), 0, 1)
+df$Disab.Dummy=as.character(df$Disab.Dummy)
+
+```
+
+#################################
+
+1.  Missing data and imputation
+
+#################################
+
+Drop rows with missing values in the target variable
+
+Assign Na to mark missingness
+```{r}
+#Let dat be your data frame after reading in the csv file, you can do
+list <- lapply(df, unique)
+# number of unique values for each column,
+length.uniq <- lengths(list)
+
+# recode to missing data
+df[df=="NaN"] <- NA
+df[df=="N/A"] <- NA
+df[df=="N/A (all years) and No)"] <- NA #cautious
+df[df=="N/A or No)"] <- NA #cautious
+df[df=="Not Applicable"] <- NA
+df[df=="N/A or no schooling"] <- NA
+df[df=="Not reported"] <- NA
+df[df=="Not Reported"] <- NA
+
+###!!!!!!
+df$VETDISAB[is.na(df$VETDISAB)] = 0
+df$GCMONTHS[is.na(df$GCMONTHS)] = 0
+df$CARPOOL[is.na(df$CARPOOL)] = 0
+
+```
+Variables with the highest rates of missingness , will not be imputed (we allow ~10% threshold)
+```{R}
+library(naniar)
+
+trim3 <- c("WKSWORK2", "RIDERS", "FAMSIZE", "VET01LTR", "UHRSWORK", "ABSENT", "LOOKING", "GCRESPON")
+df <- df[, !(names(df) %in% trim3)]
+
+pct_miss(df)
+naniar::miss_var_summary(df)
+
+#change into factors
+
+df$LABFORCE=as.factor(df$LABFORCE)
+df$WORKEDYR=as.factor(df$WORKEDYR)
+df$DIFFHEAR=as.factor(df$DIFFHEAR)
+df$CARPOOL=as.factor(df$CARPOOL)
+df$GCHOUSE=as.factor(df$GCHOUSE)
+df$GCMONTHS=as.factor(df$GCMONTHS)
+df$VET.OLD=as.factor(df$VET.OLD)
+df$WRKLSTWK=as.factor(df$WRKLSTWK)
+df$DIVINYR=as.factor(df$DIVINYR)
+```
+
+Missingness data analysis
+# We need to analyze the outcome Vs other variables with missingness
+we need to do it after all the cleaning
+```{r}
+library(naniar)
+pacman::p_load(naniar)
+# percent of ALL data frame values that are missing
+pct_miss(df)
+
+naniar::miss_var_summary(df)
+
+# Percent of rows with any value missing
+pct_miss_case(df)   # use n_complete() for counts
+pct_complete_case(df) # use n_complete() for coun
+
+#Visualizing missingness
+gg_miss_var(df, show_pct = TRUE)
+visdat::vis_miss(df)
+visdat::vis_miss(df, cluster = TRUE)
+naniar::gg_miss_upset(df, main.bar.color="red", sets.bar.color="blue")
+#Visualizing missingness (split by outcome)
+df %>% 
+    gg_miss_var(show_pct = TRUE, facet = DIFFHEAR)
+
+#facets to examine how missing data patterns vary
+ggplot(df, 
+       aes(x = sleep_rem, 
+           y = sleep_total)) + 
+  geom_miss_point() +
+  geom_smooth(method="lm", formula= y ~ x) +
+  facet_wrap(~vore)
+# Heatplot of missingness across the entire data frame  
+vis_miss(df)
+#missingness relationships
+ggplot(
+    data = df,
+    mapping = aes(x = AGE, y = DIFFHEAR)) +     
+    geom_miss_point()
+
+ggplot(
+    data = df,
+    mapping = aes(x = INCTOT, y = DIFFHEAR)) +     
+    geom_miss_point()
+#missingness relationships (category)
+#gg_miss_fct(df1, age_category)
+#how missingness has changed over time
+gg_miss_fct(df, AGE)
+
+sum(is.na(df$AGE))
+```
+Missing data in % :
+ 1 WRKLSTWK   1063   12.1  
+ 2 MARRNO      497    5.65 
+ 3 DIVINYR     497    5.65 
+ 4 AGE          84    0.955
+ 
+ WRKLSTWK seems to be as MNAR
+#```{r}
+trim4 <- c("WRKLSTWK")
+df <- df[, !(names(df) %in% trim4)]
+
+Model 1: Excluding Missing Values from Analyses AKA Complete case analysis
+```{r}
+df.comp <-df
+# list rows of data that have missing values
+df.comp[!complete.cases(df.comp),]
+
+
+mod.comp <- glm(DIFFHEAR ~ AGE + VETDISAB + CARPOOL + EDUC + FTOTINC + RACE + SEX + SPEAKENG , family="binomial", data= df)
+summary(mod.comp)
+
+#Add Karri and Jeff additional variables: 
+#VETSTAT, TRANWORK , TRANTIME, "SPEAKING
+```
+
+
+Option 2: impute missingness
+
+############
+############
+Lab 4 example
+############
+############
+
+```{r number of imputation sets}
+lambda <- 1- sum(complete.cases(df))/dim(df)[1]
+RE <- 0.99
+lambda/(RE^(-1)-1)
+```
+Multipal imputation using mice- assigning variables
+```{r 5-1}
+multiple <- df[,c("DIFFHEAR", "AGE", "RACE", "WRKLSTWK", "DIVINYR", "EDUC", "INCTOT")]
+
+# Check predictors (1 means that that column is used to impute the row variable; 0 means no use)
+test <- mice(multiple, m=3, print=F)
+test
+# Select variables to be analyzed
+predM <- test$predictorMatrix
+predM[c("AGE", "RACE", "WRKLSTWK", "DIVINYR", "INCTOT"),] <- 0
+predM[,c("AGE", "RACE", "WRKLSTWK", "DIVINYR", "INCTOT")] <- 0 
+predM
+
+# multi-imputation, here m=30 "remove.collinear=FALSE!!!!"
+df_mi <- mice(multiple, m=10, predictorMatrix = predM, print = F, seed = 1005)
+mod_mi <- with(df_mi, stats::glm(DIFFHEAR ~ AGE + EDUC + RACE + WRKLSTWK + INCTOT,
+                                 family="binomial"))
+
+# mod_mi
+summary(mice::pool(mod_mi))
+#The data frame in a long 
+data.imp <- complete(df_mi, "long")
+```
+
+############
+############
+HW4 example
+############
+############
+
+#Numeric variables (option 1) 
+ Multiple imputation
+```{r}
+### Multiple imputation 
+multiple <- df
+# Imputation
+imp <- mice(multiple, m=10, maxit=100, seed= 195, print=FALSE) #m=number of imputation, maxit=maximum number of iteration
+imp
+
+fit <- with(df_mi, stats::glm(DIFFHEAR ~ AGE + EDUC + RACE + WRKLSTWK + INCTOT,                                family="binomial"))
+
+summary(pool(fit))
+
+data.imp <- complete(imp, "long")
+```
+Missingness check
+
+```{r}
+data.imp %>% 
+    gg_miss_var(show_pct = TRUE, facet = DIFFHEAR)
+```
+```{r}
+trim5 <- c("DIVINYR")
+df <- df[, !(names(df) %in% trim5)]
+```
+ 
+Diagnostics for imputation: 
+```{r}
+# Let's visualize the distribution of imputed and observed values.
+# `cci` returns logical whether its input is complete at each observation. 
+data.imp$MARRNO.NA <- cci(data.imp$MARRNO)
+# Note that the above uses the recylcing properties of matrixes/data.frame:
+#  The `cci` call returns length 25; but because values are recylced to the total
+#  number of rows in nhanes.comp, it replicates 6 times.
+
+library(ggplot2)
+ggplot(data.imp, 
+       aes(x = .imp, y = MARRNO, color = MARRNO.NA)) + 
+  geom_jitter(show.legend = FALSE, 
+              width = .1)
+
+with(data.imp, mean(AGE))
+
+with(data.imp, t.test(AGE ~ DIFFHEAR))
+#Predictied matrix
+imp$predictorMatrix
+```
+
+choose which imputation to use to replace missing values
+fitting a regression model for each variable with missing data. Now I can do this with:
+```{r}
+#If I choose one of the imputations I can even obtain a complete dataset with missing values replaced.
+df1 <- complete(imp, 1)
+df2 <- complete(imp, 2)
+df3 <- complete(imp, 3)
+df4 <- complete(imp, 4)
+
+
+#modelFit1 <- with(imp, lm(DIFFHEAR ~ AGE1 + AGE2 + AGE2 + ........))
+
+#summary(pool(modelFit1))
+
+```
+
+################################
+Last resort: Single Imputations
+```{r}
+df.si <- df
+
+trim5 <- c("DIVINYR" ,"WRKLSTWK")
+df.si <- df.si[, !(names(df.si) %in% trim5)]
+
+df.si$AGE[which(is.na(df.si$AGE))] = mean(df.si$AGE,na.rm =TRUE)
+
+df.si %>% 
+    gg_miss_var(show_pct = TRUE, facet = DIFFHEAR)
+
+```
+
+####################################
+Clinicians model
+####################################
+
+Building a simple model based on predictors forced into the model for our clinical judgment
+
+
+# 1.1 Fit a simple model for Hearing loss using XXXXXXXXXXXXX
+
+```{r}
+mod.clin <- glm(DIFFHEAR ~ AGE + EDUC + FTOTINC + RACE + SEX + SPEAKENG , family="binomial", data= df.si)
+summary(mod.clin)
+```
+
+
+####################################
+The model
+####################################
+
+
+### OUTLINE
+
+1.  Building a simple prediction model and evaluating its performance
+2.  Building more complicated prediction models and evaluating their performance
+3.  Compare the models
+
+```{r}
+# Install & load packages
+if (!require(sas7bdat)) {install.packages("sas7bdat")}
+if (!require(Hmisc)) {install.packages("Hmisc")}
+if (!require(MASS)) {install.packages("MASS")}
+if (!require(caret)) {install.packages("caret")}
+if (!require(leaps)) {install.packages("leaps")}
+if (!require(gamlr)) {install.packages("gamlr")}
+if (!require(glmnet)) {install.packages("glmnet")}
+```
+
+Build the model in the training set
+#*****check df: df.si
+```{r}
+
+## 75% of the sample size
+smp_size <- floor(0.75 * nrow(df.si))
+
+## set the seed 
+set.seed(123)
+train_ind <- sample(seq_len(nrow(df.si)), size = smp_size)
+
+df.train <- df[train_ind, ]
+df.test <- df[-train_ind, ]
+```
+
+
+```{r}
+dim(df.train)
+dim(df.test)
+```
+
+Check the clinical model for evaluating its performance
+```{r}
+
+## Create a formula for a model with a large number of variables:
+
+mod.longsimp <- glm(DIFFHEAR ~ AGE + SEX + RACE + SPEAKENG + RACE + RACNUM + HCOVANY + HCOVPRIV + HINSEMP + HINSPUR + HCOVPUB + HINSCAID + HINSCARE + HINSVA + HINSIHS + EDUC + EMPSTAT + LABFORCE + WORKEDYR + INCTOT + FTOTINC + INCWAGE + INCBUS00 + INCWELFR + VETDISAB + CARPOOL + DEPARTS + GCHOUSE + GCMONTHS + VET.OLD, family="binomial", data= df.train)
+
+summary(mod.longsimp); exp(cbind(coef(mod.longsimp), confint(mod.longsimp)))
+
+#excluded: MARST 
+```
+
+Calculated the predicted values in the model we fit
+
+```{r}
+pred_clin_train <- predict(mod.longsimp, newdata=df.train)
+pred_clin_test <- predict(mod.longsimp, newdata=df.test)
+summary(pred_clin_train)
+summary(pred_clin_test)
+```
+predicted versus observed DIFFHEAR in both training and test datasets for clin Model 
+```{r}
+plot(pred_clin_train, df.train$DIFFHEAR)
+abline(coef=c(0,1), col="red")
+plot(pred_clin_test, df.test$DIFFHEAR)
+abline(coef=c(0,1), col="red")
+```
+
+Discrimination: Receiver Operating Characteristic (ROC) curve and c-statistics/AUC
+```{r}
+# Install & load packages
+if (!require(sas7bdat)) {install.packages("sas7bdat")}
+if (!require(dplyr)) {install.packages("dplyr")}
+if (!require(purrr)) {install.packages("purrr")}
+if (!require(pROC)) {install.packages("pROC")}
+if (!require(survivalROC)) {install.packages("survivalROC")}
+if (!require(survival)) {install.packages("survival")}
+if (!require(tidyr)) {install.packages("tidyr")}
+```
+
+Calculate predicted probability (DIFFHEAR=1)
+```{r}
+df.train$p_a <- predict(mod.longsimp, type="response", newdata=df.train)
+
+df.test$p_a <- predict(mod.longsimp, type="response", newdata=df.test)
+```
+
+Create ROC curve for Model A and calculate c-stat/AUC
+
+```{r}
+roccurve.longsimp.tr <- roc(df.train$DIFFHEAR ~ df.train$p_a); roccurve.longsimp.tr # N = 6598
+plot(roccurve.longsimp.tr, legacy.axes=T, main="ROC curve for Model A", col="blue")
+
+roccurve.longsimp.ts <- roc(df.test$DIFFHEAR ~ df.test$p_a); roccurve.longsimp.ts # N = 2200
+plot(roccurve.longsimp.ts, legacy.axes=T, main="ROC curve for Model B", col="red")
+
+# Compare AUCs using DeLong's test
+roc.test(roccurve.longsimp.tr, roccurve.longsimp.ts, alternative="two.sided") 
+
+# ROC curves of the two models 
+plot(roccurve.longsimp.tr, legacy.axes=T, col="blue"); plot(roccurve.longsimp.ts, legacy.axes=T, col="red", add=T) 
+legend("bottomright", legend=c("AUC (Model A): 0.744", "AUC (Model B): 0.728"), col=c("blue", "red"), lty=1:1, cex=0.3)
+
+```
+
+
+#############################################
+
+Building more complicated prediction model 
+#############################################
+
+#### 
+
+Fit a prediction model with stepwise selection using (AIC) as the stop criteria
+```{r, results=F}
+#Remove missing and impute
+
+df.sw <- df.si
+
+df.sw %>% 
+    gg_miss_var(show_pct = TRUE, facet = DIFFHEAR)
+
+## 75% of the sample size
+smp_size <- floor(0.75 * nrow(df.sw))
+
+## set the seed 
+set.seed(123)
+train_ind <- sample(seq_len(nrow(df.sw)), size = smp_size)
+
+df.train.sw <- df.sw[train_ind, ]
+df.test.sw <- df.sw[-train_ind, ]
+```
+AIC stepwise train set
+```{r}
+Fitall.tr <- glm(DIFFHEAR ~ AGE + SEX + RACE + SPEAKENG + RACNUM + HCOVANY + HCOVPRIV + HINSEMP + HINSPUR + HCOVPUB + HINSCAID + HINSCARE + HINSVA + HINSIHS + EDUC + EMPSTAT + LABFORCE + WORKEDYR + INCTOT + FTOTINC + INCWAGE + INCBUS00 + INCWELFR + VETDISAB + CARPOOL + DEPARTS + GCHOUSE + GCMONTHS + VET.OLD, family="binomial", data= df.train)
+
+Fitstart <- glm(DIFFHEAR ~ 1, family="binomial", data= df.train.sw)
+
+summary(Fitstart)
+formula(Fitstart)
+step(Fitstart, direction ="forward", scope = formula(Fitall.tr))
+
+summary(Fitall.tr) 
+formula(Fitall.tr)
+
+```
+AIC stepwise test set
+```{r}
+Fitall.ts <- glm(DIFFHEAR ~ AGE + SEX + RACE + SPEAKENG + RACE + RACNUM + HCOVANY + HCOVPRIV + HINSEMP + HINSPUR + HCOVPUB + HINSCAID + HINSCARE + HINSVA + HINSIHS + EDUC + EMPSTAT + LABFORCE + WORKEDYR + INCTOT + FTOTINC + INCWAGE + INCBUS00 + INCWELFR + VETDISAB + CARPOOL + DEPARTS + GCHOUSE + GCMONTHS + VET.OLD, family="binomial", data= df.train)
+
+Fitstart <- glm(DIFFHEAR ~ 1, family="binomial", data= df.test.sw)
+
+summary(Fitstart)
+formula(Fitstart)
+step(Fitstart, direction ="forward", scope = formula(Fitall.ts))
+
+summary(Fitall.ts) 
+formula(Fitall.ts)
+```
+
+Calculate predicted probability (DIFFHEAR=1)
+```{r}
+
+df.train.sw$p_a <- predict(Fitall.ts, type="response", newdata=df.train)
+df.test.sw$p_a <- predict(Fitall.ts, type="response", newdata=df.test)
+
+
+roccurve.sw.tr <- roc(df.train.sw$DIFFHEAR ~ df.train.sw$p_a); roccurve.sw.tr # N = 6598
+plot(roccurve.sw.tr, legacy.axes=T, main="ROC curve for Model A.sw", col="blue")
+
+roccurve.sw.ts <- roc(df.test.sw$DIFFHEAR ~ df.test.sw$p_a); roccurve.sw.ts # N = 2200
+plot(roccurve.sw.ts, legacy.axes=T, main="ROC curve for Model B.sw", col="red")
+
+# Compare AUCs using DeLong's test
+roc.test(roccurve.sw.tr, roccurve.sw.ts, alternative="two.sided") 
+
+# ROC curves of the two models 
+plot(roccurve.sw.tr, legacy.axes=T, col="blue"); plot(roccurve.sw.ts, legacy.axes=T, col="red", add=T) 
+legend("bottomright", legend=c("AUC (Model A): 0.744", "AUC (Model B): 0.728"), col=c("blue", "red"), lty=1:1, cex=0.3)
+
+```
+
+######
+#########
+#############
+#############
+#### 2.2.2 Output predicted values of  Model B.
+
+```{r}
+pred_b_train <- predict(mod.b, newdata=df.train)
+pred_b_test <- predict(mod.b, newdata=df.test)
+```
+
+Applies one hot encoding the categorical independent in the training:
+```{r}
+df.lr <- df.si
+
+## 75% of the sample size
+smp_size <- floor(0.75 * nrow(df.lr))
+
+## set the seed 
+set.seed(123)
+train_ind <- sample(seq_len(nrow(df.lr)), size = smp_size)
+
+df.train.lr <- df.lr[train_ind, ]
+df.test.lr <- df.lr[-train_ind, ]
+```
+Preparing Data in R One Hot Encoding for Lasso and Ridge Models
+```{r}
+trim10 <- c("Disab.Dummy")
+df.lr <- df.lr[, !(names(df.lr) %in% trim10)]
+
+#recode ordinal as numeric
+dplyr::mutate(df.lr,  
+                     EDUC = 
+                          dplyr::recode_factor(EDUC,   
+                             `1`="N/A or no schooling", `2`="ElemSc21",  
+                             `3`="ElemSc2", `4` = "HighSc", `4` = "Grade 12", `5` = "College1", `6` = "College2",  
+                             .ordered = TRUE))
+
+
+list <- lapply(df.si, class)
+
+#Convet to binary "hot code"
+#df.train.lr$SEX +df.train.lr$MARST +df.train.lr$RACE +df.train.lr$SPEAKENG +df.train.lr$RACNUM #+df.train.lr$HCOVANY +df.train.lr$HCOVPRIV +df.train.lr$HINSEMP +df.train.lr$HINSPUR +df.train.lr$HCOVPUB #+df.train.lr$HINSCAID +df.train.lr$HINSCARE +df.train.lr$HINSVA +df.train.lr$HINSIHS +df.train.lr$EDUC #+df.train.lr$EMPSTAT +df.train.lr$LABFORCE +df.train.lr$WORKEDYR +df.train.lr$VETDISAB #+df.train.lr$CARPOOL +df.train.lr$GCHOUSE +df.train.lr$GCMONTHS +df.train.lr$VET.OLD
+
+#Hot encode caegorical in train
+trainfactors <- model.matrix(df.train.lr$DIFFHEAR ~ df.train.lr$SEX +df.train.lr$MARST +df.train.lr$RACE +df.train.lr$SPEAKENG +df.train.lr$RACNUM +df.train.lr$HCOVANY +df.train.lr$HCOVPRIV +df.train.lr$HINSEMP +df.train.lr$HINSPUR +df.train.lr$HCOVPUB +df.train.lr$HINSCAID +df.train.lr$HINSCARE +df.train.lr$HINSVA +df.train.lr$HINSIHS +df.train.lr$EDUC +df.train.lr$EMPSTAT +df.train.lr$LABFORCE +df.train.lr$WORKEDYR +df.train.lr$VETDISAB +df.train.lr$CARPOOL +df.train.lr$GCHOUSE +df.train.lr$GCMONTHS +df.train.lr$VET.OLD)[,-1]
+
+train.x <- as.matrix(trainfactors, df.train.lr$AGE, df.train.lr$INCTOT, df.train.lr$FTOTINC, df.train.lr$INCWAGE, df.train.lr$INCBUS00, df.train.lr$INCWELFR, df.train.lr$DEPARTS)
+
+#Hot encode caegorical in test
+testfactors <- model.matrix(df.test.lr$DIFFHEAR ~ df.test.lr$SEX +df.test.lr$MARST +df.test.lr$RACE +df.test.lr$SPEAKENG +df.test.lr$RACNUM +df.test.lr$HCOVANY +df.test.lr$HCOVPRIV +df.test.lr$HINSEMP +df.test.lr$HINSPUR +df.test.lr$HCOVPUB +df.test.lr$HINSCAID +df.test.lr$HINSCARE +df.test.lr$HINSVA +df.test.lr$HINSIHS +df.test.lr$EDUC +df.test.lr$EMPSTAT +df.test.lr$LABFORCE +df.test.lr$WORKEDYR +df.test.lr$VETDISAB +df.test.lr$CARPOOL +df.test.lr$GCHOUSE +df.test.lr$GCMONTHS +df.test.lr$VET.OLD)[,-1]
+
+test.x <- as.matrix(testfactors, df.test.lr$AGE, df.test.lr$INCTOT, df.test.lr$FTOTINC, df.test.lr$INCWAGE, df.test.lr$INCBUS00, df.test.lr$INCWELFR, df.test.lr$DEPARTS)
+
+```
+
+
+```{r}
+
+# Use glmnet
+mod.c <- glmnet(x=train.x, y=df.train.lr$DIFFHEAR, alpha=1)# alpha=1 means lasso
+plot(mod.c) # show lasso path
+
+# Use gamlr
+mod.c.gamlr <- gamlr(x=train.x, y=df.train.lr$DIFFHEAR)
+plot(mod.c.gamlr) # lambda
+mod.c.gamlr$lambda[which.min(AICc(mod.c.gamlr))] #select the lambda based on smallest AIC
+
+# Selected variables
+coef(mod.c, s=2)
+
+pred_c_train <- predict(mod.c, s=2,
+                        newx=as.matrix(train.x))
+pred_c_test <- predict(mod.c, s=2, 
+                       newx=as.matrix(test.x))
+```
+
+
