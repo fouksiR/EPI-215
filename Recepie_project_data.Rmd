@@ -127,6 +127,7 @@ df["EDUC"][df["EDUC"] == "College1"] <- "4"
 df["EDUC"][df["EDUC"] == "HighSc"] <- "3"
 df["EDUC"][df["EDUC"] == "ElemSc2"] <- "2"
 df["EDUC"][df["EDUC"] == "ElemSc21"] <- "1"
+df["EDUC"][df["EDUC"] == "ElemSc1"] <- "1"
 df["EDUC"][df["EDUC"] == "N/A or no schooling"] <- "NA"
 
 df$EDUC =as.ordered(df$EDUC)
@@ -457,10 +458,6 @@ data.imp <- complete(imp, "long")
 Missingness check
 
 ```{r}
-data.imp %>% 
-    gg_miss_var(show_pct = TRUE, facet = DIFFHEAR)
-```
-```{r}
 trim5 <- c("DIVINYR")
 df <- df[, !(names(df) %in% trim5)]
 ```
@@ -496,11 +493,8 @@ df2 <- complete(imp, 2)
 df3 <- complete(imp, 3)
 df4 <- complete(imp, 4)
 
-
 #modelFit1 <- with(imp, lm(DIFFHEAR ~ AGE1 + AGE2 + AGE2 + ........))
-
 #summary(pool(modelFit1))
-
 ```
 
 ################################
@@ -508,7 +502,7 @@ Last resort: Single Imputations
 ```{r}
 df.si <- df
 
-trim5 <- c("DIVINYR" ,"WRKLSTWK")
+trim5 <- c("DIVINYR" ,"WRKLSTWK", "MARRNO", "Disab.Dummy")
 df.si <- df.si[, !(names(df.si) %in% trim5)]
 
 df.si$AGE[which(is.na(df.si$AGE))] = mean(df.si$AGE,na.rm =TRUE)
@@ -733,6 +727,9 @@ Applies one hot encoding the categorical independent in the training:
 ```{r}
 df.lr <- df.si
 
+factors <- c("SEX","AGE", "MARST","RACE", "SPEAKENG", "RACNUM", "HCOVANY", "HCOVPRIV", "HINSEMP", "HCOVPUB", "HINSCAID", "HINSCARE", "HINSVA", "HINSIHS", "EDUC", "EMPSTAT", "VETDISAB", "HINSPUR" )
+df.lr[,factors] <- lapply(df.lr[,factors] , factor)
+
 ## 75% of the sample size
 smp_size <- floor(0.75 * nrow(df.lr))
 
@@ -744,55 +741,44 @@ df.train.lr <- df.lr[train_ind, ]
 df.test.lr <- df.lr[-train_ind, ]
 ```
 Preparing Data in R One Hot Encoding for Lasso and Ridge Models
+
 ```{r}
-trim10 <- c("Disab.Dummy")
-df.lr <- df.lr[, !(names(df.lr) %in% trim10)]
-
-#recode ordinal as numeric
-dplyr::mutate(df.lr,  
-                     EDUC = 
-                          dplyr::recode_factor(EDUC,   
-                             `1`="N/A or no schooling", `2`="ElemSc21",  
-                             `3`="ElemSc2", `4` = "HighSc", `4` = "Grade 12", `5` = "College1", `6` = "College2",  
-                             .ordered = TRUE))
-
-
-list <- lapply(df.si, class)
-
-#Convet to binary "hot code"
-#df.train.lr$SEX +df.train.lr$MARST +df.train.lr$RACE +df.train.lr$SPEAKENG +df.train.lr$RACNUM #+df.train.lr$HCOVANY +df.train.lr$HCOVPRIV +df.train.lr$HINSEMP +df.train.lr$HINSPUR +df.train.lr$HCOVPUB #+df.train.lr$HINSCAID +df.train.lr$HINSCARE +df.train.lr$HINSVA +df.train.lr$HINSIHS +df.train.lr$EDUC #+df.train.lr$EMPSTAT +df.train.lr$LABFORCE +df.train.lr$WORKEDYR +df.train.lr$VETDISAB #+df.train.lr$CARPOOL +df.train.lr$GCHOUSE +df.train.lr$GCMONTHS +df.train.lr$VET.OLD
-
 #Hot encode caegorical in train
 trainfactors <- model.matrix(df.train.lr$DIFFHEAR ~ df.train.lr$SEX +df.train.lr$MARST +df.train.lr$RACE +df.train.lr$SPEAKENG +df.train.lr$RACNUM +df.train.lr$HCOVANY +df.train.lr$HCOVPRIV +df.train.lr$HINSEMP +df.train.lr$HINSPUR +df.train.lr$HCOVPUB +df.train.lr$HINSCAID +df.train.lr$HINSCARE +df.train.lr$HINSVA +df.train.lr$HINSIHS +df.train.lr$EDUC +df.train.lr$EMPSTAT +df.train.lr$LABFORCE +df.train.lr$WORKEDYR +df.train.lr$VETDISAB +df.train.lr$CARPOOL +df.train.lr$GCHOUSE +df.train.lr$GCMONTHS +df.train.lr$VET.OLD)[,-1]
 
-train.x <- as.matrix(trainfactors, df.train.lr$AGE, df.train.lr$INCTOT, df.train.lr$FTOTINC, df.train.lr$INCWAGE, df.train.lr$INCBUS00, df.train.lr$INCWELFR, df.train.lr$DEPARTS)
+train.x <- data.matrix(data.frame(trainfactors, df.train.lr$AGE, df.train.lr$INCTOT, df.train.lr$FTOTINC, df.train.lr$INCWAGE, df.train.lr$INCBUS00, df.train.lr$INCWELFR, df.train.lr$DEPARTS))
 
 #Hot encode caegorical in test
 testfactors <- model.matrix(df.test.lr$DIFFHEAR ~ df.test.lr$SEX +df.test.lr$MARST +df.test.lr$RACE +df.test.lr$SPEAKENG +df.test.lr$RACNUM +df.test.lr$HCOVANY +df.test.lr$HCOVPRIV +df.test.lr$HINSEMP +df.test.lr$HINSPUR +df.test.lr$HCOVPUB +df.test.lr$HINSCAID +df.test.lr$HINSCARE +df.test.lr$HINSVA +df.test.lr$HINSIHS +df.test.lr$EDUC +df.test.lr$EMPSTAT +df.test.lr$LABFORCE +df.test.lr$WORKEDYR +df.test.lr$VETDISAB +df.test.lr$CARPOOL +df.test.lr$GCHOUSE +df.test.lr$GCMONTHS +df.test.lr$VET.OLD)[,-1]
 
-test.x <- as.matrix(testfactors, df.test.lr$AGE, df.test.lr$INCTOT, df.test.lr$FTOTINC, df.test.lr$INCWAGE, df.test.lr$INCBUS00, df.test.lr$INCWELFR, df.test.lr$DEPARTS)
-
+test.x <- data.matrix(data.frame(testfactors, df.test.lr$AGE, df.test.lr$INCTOT, df.test.lr$FTOTINC, df.test.lr$INCWAGE, df.test.lr$INCBUS00, df.test.lr$INCWELFR, df.test.lr$DEPARTS))
 ```
 
 
 ```{r}
 
-# Use glmnet
-mod.c <- glmnet(x=train.x, y=df.train.lr$DIFFHEAR, alpha=1)# alpha=1 means lasso
-plot(mod.c) # show lasso path
+CVlasso <-cv.glmnet(train.x, df.train.lr$DIFFHEAR, type.measure= "class", family = "binomial", alpha=1, nfolds = 5)          # use K fold CV
 
-# Use gamlr
-mod.c.gamlr <- gamlr(x=train.x, y=df.train.lr$DIFFHEAR)
-plot(mod.c.gamlr) # lambda
-mod.c.gamlr$lambda[which.min(AICc(mod.c.gamlr))] #select the lambda based on smallest AIC
+plot(CVlasso)
+CVlasso$lambda
+CVlasso$lambda.min
+CVlasso$lambda.1se
 
-# Selected variables
-coef(mod.c, s=2)
+coef(CVlasso, s= "lambda.min")
+coef(CVlasso, s= "lambda.1se")
+```
 
-pred_c_train <- predict(mod.c, s=2,
-                        newx=as.matrix(train.x))
-pred_c_test <- predict(mod.c, s=2, 
-                       newx=as.matrix(test.x))
+```{r}
+
+ypred <- predict(CVlasso, s= CVlasso$lambda.1se, newx = train.x, type= "class")
+
+t1 <-table(ypred,df.train.lr$DIFFHEAR)
+t1
+
+if (!require(caret)) {install.packages("caret")}
+if (!require(e1071)) {install.packages("e1071")}
+
+confusionMatrix(t1)
 ```
 
 
